@@ -2,7 +2,7 @@
 # 构建上下文 = 仓库根目录（deploy/install.sh 已 cd 到根目录）
 FROM docker.m.daocloud.io/library/golang:1.24-alpine AS build
 ARG GOPROXY_PROXY=https://goproxy.cn,direct
-ENV GOPROXY=${GOPROXY_PROXY} GOSUMDB=off CGO_ENABLED=0
+ENV GOPROXY=${GOPROXY_PROXY} CGO_ENABLED=0 GOTOOLCHAIN=auto
 WORKDIR /src
 COPY go-backend/go.mod go-backend/go.sum* ./
 RUN go mod download || true
