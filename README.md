@@ -3,6 +3,18 @@
 对标 KubeSphere 使用体验的开源 Kubernetes 管理平台，使用 **Go (client-go) + Vue3** 构建，
 内置 **沙箱管理** 平台。单二进制部署，前端嵌入二进制，无需外部数据库。
 
+## 界面预览
+
+| 集群总览 | 沙箱管理 |
+| --- | --- |
+| ![dashboard](docs/screenshots/dashboard.png) | ![sandbox-list](docs/screenshots/sandbox-list.png) |
+
+| 工作负载详情 | 沙箱创建 |
+| --- | --- |
+| ![workload-detail](docs/screenshots/workload-detail.png) | ![sandbox-create](docs/screenshots/sandbox-create.png) |
+
+更多：[容器组日志与终端](docs/screenshots/pods.png)、[YAML 应用中心](docs/screenshots/yaml-apply.png)（位于 docs/screenshots/）。
+
 ## 功能总览
 
 | 模块 | 能力 |
@@ -18,8 +30,21 @@
 | 权限管理 | ServiceAccount / Role / RoleBinding / ClusterRole / ClusterRoleBinding |
 | CRD 浏览器 | 发现集群全部 API 资源（含任意 Operator CRD）并做通用 CRUD 与 YAML 编辑 |
 | 事件查询 | 全局/项目范围过滤、类型过滤、自动刷新 |
-| **沙箱管理** | 一键创建隔离沙箱环境（独立命名空间 + ResourceQuota + LimitRange + 工作负载模板）、启停、续期、到期 TTL 自动回收、NodePort 暴露、内嵌终端；自动发现集群已有 E2B/OpenSandbox/agents.x-k8s.io 沙箱实例统一展示 |
+| **沙箱管理** | 见下节 |
 | YAML 应用中心 | 多文档 YAML 在线应用（语义同 kubectl apply），创建或更新 |
+
+## 沙箱管理
+
+- **一键创建隔离环境**：独立命名空间 + ResourceQuota + LimitRange + 工作负载，
+  支持 CPU/内存配额、**GPU 数量**（nvidia.com/gpu，需集群安装 device plugin）、TTL 有效时长
+- **7 种内置模板**：Ubuntu / Alpine / Python / Node.js / **VS Code 网页版（code-server）** /
+  Nginx / Redis，带端口与启动参数
+- **TTL 智能回收**：到期由后台自动清理；**停止沙箱即暂停倒计时**（paused），
+  重新启动后继续计时
+- **可观测**：实时 CPU/内存用量（metrics-server）、到期倒计时（<1 小时高亮）、自动刷新
+- **访问**：NodePort 服务自动分配并生成可点击直链；描述支持行内编辑
+- **网页终端**：沙箱内直接开 shell（bash/sh 自动回退）
+- **第三方沙箱发现**：自动列出集群中已有的 E2B/OpenSandbox Pod 与 agents.x-k8s.io Sandbox CR
 
 ## 架构
 

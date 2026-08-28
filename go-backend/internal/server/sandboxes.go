@@ -75,6 +75,21 @@ func handleSandboxRenew(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func handleSandboxDescription(c *gin.Context) {
+	var req struct {
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+	if err := sandbox.UpdateDescription(c.Request.Context(), c.Param("name"), req.Description); err != nil {
+		httpKubeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func handleSandboxDelete(c *gin.Context) {
 	if err := sandbox.Delete(c.Request.Context(), c.Param("name")); err != nil {
 		httpKubeError(c, err)

@@ -20,6 +20,10 @@
     const map = {};
     return {
       on(ev, fn) { (map[ev] = map[ev] || []).push(fn); },
+      off(ev, fn) {
+        if (!map[ev]) return;
+        map[ev] = map[ev].filter((f) => f !== fn);
+      },
       emit(ev, ...args) { (map[ev] || []).forEach((f) => { try { f(...args); } catch (e) {} }); },
     };
   })();
@@ -53,7 +57,7 @@
 
   /* -------- login gate component -------- */
   const LoginGate = {
-    data() { return { user: 'admin', password: '', busy: false }; },
+    data() { return { user: 'admin', password: '', busy: false, err: '' }; },
     methods: {
       async submit() {
         if (!this.user.trim()) return;
@@ -193,9 +197,16 @@
     <div v-else class="boot-loading">正在连接集群…</div>`,
   };
 
-  createApp(AppRoot).mount('#app');
-  /* register globals AFTER mount so every component (setup & options) can use them */
-  const appInst = document.querySelector('#app').__vue_app__;
-  appInst.config.globalProperties.$toast = window.toast;
-  appInst.config.globalProperties.U = window.U;
+  const appInstance = createApp(AppRoot);
+  // register shared components globally: ResTable embeds ResDrawer by name and
+  // both load in separate files, so resolution must happen at mount time.
+  [
+    ['Badge', window.Badge], ['Modal', window.Modal], ['Drawer', window.Drawer],
+    ['PageTabs', window.PageTabs], ['KVList', window.KVList], ['ProgressStat', window.ProgressStat],
+    ['ResTable', window.ResTable], ['ResDrawer', window.ResDrawer],
+    ['LogViewer', window.LogViewer], ['TerminalPane', window.TerminalPane],
+  ].forEach(([name, comp]) => { if (comp) appInstance.component(name, comp); });
+  appInstance.config.globalProperties.$toast = window.toast;
+  appInstance.config.globalProperties.U = window.U;
+  appInstance.mount('#app');
 })();

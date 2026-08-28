@@ -59,6 +59,8 @@
   /* ---------------- generic resource table ----------------
      props.gvrPath : "apps/v1/deployments" or "v1/pods"
      rows fetched with current namespace from store unless fixedNs given.
+     Every table carries a built-in detail drawer, so 详情 works on all pages;
+     parents may still intercept via @detail (used by pods & workloads).
   */
   window.ResTable = {
     components: { Badge: window.Badge, Modal: window.Modal },
@@ -66,14 +68,14 @@
       gvrPath: String,
       label: String,
       namespaced: { type: Boolean, default: true },
-      columns: { type: Array, default: [] },     // extra column defs {key,label,render?(row)}
+      columns: { type: Array, default: () => [] },  // extra column defs {key,label,render?(row)}
       actions: { type: Object, default: () => ({ edit: true, del: true }) },
       kindPlural: String,                        // override plural path segment if differs
     },
     setup(props) { return { store: window.store }; },
     data() {
-      return { rows: [], loading: false, error: '', q: '', detailOpen: false, editing: null,
-               editYaml: '', saving: false, confirmDel: null };
+      return { rows: [], loading: false, error: '', q: '', editing: null,
+               editYaml: '', saving: false, confirmDel: null, innerDetail: null };
     },
     computed: {
       filtered() {
@@ -106,9 +108,12 @@
         return p;
       },
       age(r) { return U.age(r.metadata.creationTimestamp); },
-      async openDetail(r) {
-        this.$emit('detail', r);   // parent may open rich drawer
-        this.detailRow = r;
+      openDetail(r) {
+        if (this.$attrs && this.$attrs.onDetail) {
+          this.$emit('detail', r);       // parent provides its own drawer
+        } else {
+          this.innerDetail = r;          // built-in drawer: works on every page
+        }
       },
       async edit(r) {
         try {
@@ -141,8 +146,14 @@
         } catch (e) { this.$toast('删除失败: ' + e.message, 'error'); }
       },
     },
-    mounted() { this.refresh(); window.bus.on('refresh-all', () => this.refresh()); },
-    unmounted() { /* bus listeners are coarse-grained; harmless */ },
+    mounted() {
+      this.refresh();
+      this._onRefresh = () => this.refresh();
+      window.bus.on('refresh-all', this._onRefresh);
+    },
+    unmounted() {
+      if (this._onRefresh) window.bus.off('refresh-all', this._onRefresh);
+    },
     template: `
     <div class="res-table card">
       <div class="table-toolbar">
@@ -165,7 +176,7 @@
             <tr v-else-if="!filtered.length"><td :colspan="6+columns.length" class="empty">暂无数据</td></tr>
             <tr v-for="r in filtered" :key="(r.metadata.namespace||'')+'/'+r.metadata.name">
               <td>
-                <a href="javascript:;" class="link strong" @click.stop="$emit('detail', r)">{{ r.metadata.name }}</a>
+                <a href="javascript:;" class="link strong" @click.stop="openDetail(r)">{{ r.metadata.name }}</a>
                 <div class="sublabels" v-if="r.metadata.labels && Object.keys(r.metadata.labels).length">
                   {{ Object.entries(r.metadata.labels).slice(0,3).map(([k,v])=>k+'='+v).join(' · ') }}
                 </div>
@@ -175,7 +186,7 @@
               <td v-for="c in columns" :key="c.key">{{ c.render ? c.render(r) : '-' }}</td>
               <td>{{ age(r) }}</td>
               <td class="td-actions">
-                <button class="mini-btn" @click.stop="$emit('detail', r)">详情</button>
+                <button class="mini-btn" @click.stop="openDetail(r)">详情</button>
                 <button v-if="actions.edit" class="mini-btn" @click.stop="edit(r)">编辑</button>
                 <button v-if="actions.del" class="mini-btn danger" @click.stop="confirmDel=r">删除</button>
               </td>
@@ -197,6 +208,8 @@
           <button class="btn danger" @click="del(confirmDel)">确认删除</button>
         </template>
       </Modal>
+      <ResDrawer v-if="innerDetail" :gvr-path="gvrPath" :namespaced="namespaced"
+                 :item="innerDetail" @close="innerDetail=null"/>
     </div>`,
   };
 

@@ -17,7 +17,11 @@ func Register(r *gin.Engine) error {
 
 	r.GET("/", indexH)
 	r.GET("/index.html", indexH)
-	r.GET("/static/*path", assetsH)
+	noCache := func(c *gin.Context) { c.Writer.Header().Set("Cache-Control", "no-store") }
+	r.GET("/static/*path", func(c *gin.Context) {
+		noCache(c)
+		assetsH(c)
+	})
 	r.GET("/favicon.ico", func(c *gin.Context) { c.Status(204) })
 
 	r.POST("/api/login", handleLogin)
@@ -52,6 +56,7 @@ func Register(r *gin.Engine) error {
 		sbx.POST("/:name/start", handleSandboxStart)
 		sbx.POST("/:name/stop", handleSandboxStop)
 		sbx.POST("/:name/renew", handleSandboxRenew)
+		sbx.PATCH("/:name/description", handleSandboxDescription)
 		sbx.DELETE("/:name", handleSandboxDelete)
 	}
 

@@ -141,12 +141,13 @@
           if (this.ws && this.ws.readyState === 1) this.ws.send(data);
         });
         this.term = term; this.fit = fit;
-        window.addEventListener('resize', this.onResize = () => { try { fit.fit(); } catch (e) {} });
+        this.onResize = () => { try { fit.fit(); } catch (e) {} };
+        window.addEventListener('resize', this.onResize);
       },
       destroy() {
         if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
         if (this.term) { try { this.term.dispose(); } catch (e) {} this.term = null; }
-        if (this._onResize) window.removeEventListener('resize', this.onResize);
+        if (this.onResize) window.removeEventListener('resize', this.onResize);
       },
       connect() {
         this.destroyWSOnly();

@@ -10,6 +10,16 @@
 <body>
 <div id="app"></div>
 
+<script>
+/* surface runtime errors in the tab title for headless diagnostics */
+window.addEventListener('error', function (e) {
+  document.title = 'JSERR: ' + e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno;
+});
+window.addEventListener('unhandledrejection', function (e) {
+  document.title = 'REJ: ' + ((e.reason && e.reason.message) || e.reason);
+});
+</script>
+
 <script src="/static/vendor/vue.global.prod.js"></script>
 <script src="/static/vendor/xterm.js"></script>
 <script src="/static/vendor/xterm-addon-fit.js"></script>

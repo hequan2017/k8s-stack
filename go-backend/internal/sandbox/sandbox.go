@@ -16,7 +16,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -32,6 +34,7 @@ const (
 	AnnTTLHours    = "kubestack.dev/ttl-hours"
 	AnnDescription = "kubestack.dev/description"
 	AnnNodePort    = "kubestack.dev/nodeport"
+	AnnPaused      = "kubestack.dev/paused"
 	quotaName      = "sandbox-quota"
 	limitRangeName = "sandbox-limits"
 )
@@ -39,12 +42,16 @@ const (
 var nameRe = regexp.MustCompile(`^[a-z]([-a-z0-9]{0,30}[a-z0-9])?$`)
 
 type Template struct {
-	Key         string  `json:"key"`
-	Name        string  `json:"name"`
-	Image       string  `json:"image"`
-	Description string  `json:"description"`
-	Ports       []int32 `json:"ports"`
-	TTY         bool    `json:"tty"`
+	Key             string   `json:"key"`
+	Name            string   `json:"name"`
+	Image           string   `json:"image"`
+	Description     string   `json:"description"`
+	Ports           []int32  `json:"ports"`
+	TTY             bool     `json:"tty"`
+	Args            []string `json:"args,omitempty"`
+	DefaultNodePort bool     `json:"defaultNodePort"`
+	// Category groups templates in the creation form.
+	Category string `json:"category"`
 
 	command []string
 }
@@ -52,13 +59,27 @@ type Template struct {
 func Templates() []Template {
 	return []Template{
 		{Key: "ubuntu", Name: "Ubuntu 24.04", Image: "docker.m.daocloud.io/library/ubuntu:24.04",
-			command: []string{"sleep", "infinity"}, Description: "Ubuntu 基础环境，适合通用实验", TTY: true},
-		{Key: "python", Name: "Python 3.12", Image: "docker.m.daocloud.io/library/python:3.12-slim",
-			command: []string{"sleep", "infinity"}, Description: "Python 运行环境（可 pip 安装依赖）", TTY: true},
+			command: []string{"sleep", "infinity"}, Description: "Ubuntu 基础环境，适合通用实验", TTY: true,
+			Category: "基础"},
 		{Key: "alpine", Name: "Alpine 3.20", Image: "docker.m.daocloud.io/library/alpine:3.20",
-			command: []string{"sleep", "infinity"}, Description: "轻量 Linux 环境，秒级启动", TTY: true},
+			command: []string{"sleep", "infinity"}, Description: "轻量 Linux 环境，秒级启动", TTY: true,
+			Category: "基础"},
+		{Key: "python", Name: "Python 3.12", Image: "docker.m.daocloud.io/library/python:3.12-slim",
+			command: []string{"sleep", "infinity"}, Description: "Python 运行环境（可 pip 安装依赖）", TTY: true,
+			Category: "开发"},
+		{Key: "node", Name: "Node.js 22", Image: "docker.m.daocloud.io/library/node:22-alpine",
+			command: []string{"sleep", "infinity"}, Description: "Node.js 运行环境（可 npm 安装依赖）", TTY: true,
+			Category: "开发"},
+		{Key: "codeserver", Name: "VS Code（网页版）", Image: "docker.m.daocloud.io/coder/code-server:4.92.2",
+			Args: []string{"--auth=none", "--bind-addr=0.0.0.0:8080"},
+			Description: "浏览器里的 VS Code，创建后通过 NodePort 访问", Ports: []int32{8080},
+			TTY: true, DefaultNodePort: true, Category: "开发"},
 		{Key: "nginx", Name: "Nginx Web 服务", Image: "docker.m.daocloud.io/library/nginx:1.27-alpine",
-			Description: "Web 服务沙箱，默认暴露 80 端口", Ports: []int32{80}},
+			Description: "Web 服务沙箱，默认暴露 80 端口", Ports: []int32{80},
+			Category: "服务"},
+		{Key: "redis", Name: "Redis 7", Image: "docker.m.daocloud.io/library/redis:7-alpine",
+			Description: "Redis 内存数据库沙箱，端口 6379", Ports: []int32{6379},
+			Category: "服务"},
 	}
 }
 
@@ -79,22 +100,29 @@ type CreateRequest struct {
 	TTLHours    float64 `json:"ttlHours"`
 	NodePort    bool    `json:"nodePort"`
 	Description string  `json:"description"`
+	Gpu         int     `json:"gpu"` // number of nvidia.com/gpu to request
 }
 
 type Item struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace"`
-	Template    string            `json:"template"`
-	Status      string            `json:"status"`
-	Ready       string            `json:"ready"`
-	CPU         string            `json:"cpu"`
-	Memory      string            `json:"memory"`
-	AgeSeconds  int64             `json:"ageSeconds"`
-	ExpiresAt   int64             `json:"expiresAt"`
-	TTLHours    float64           `json:"ttlHours"`
-	Description string            `json:"description"`
-	NodePort    int32             `json:"nodePort"`
-	ClusterIP   string            `json:"clusterIP"`
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	Template    string    `json:"template"`
+	Status      string    `json:"status"`
+	Ready       string    `json:"ready"`
+	CPU         string    `json:"cpu"`
+	Memory      string    `json:"memory"`
+	RealCPU     string    `json:"realCpu"`
+	RealMemory  string    `json:"realMemory"`
+	AgeSeconds  int64     `json:"ageSeconds"`
+	ExpiresAt   int64     `json:"expiresAt"`
+	TTLHours    float64   `json:"ttlHours"`
+	Description string    `json:"description"`
+	NodePort    int32     `json:"nodePort"`
+	NodeIP      string    `json:"nodeIP"`
+	ClusterIP   string    `json:"clusterIP"`
+	Ports       []int32   `json:"ports,omitempty"`
+	Paused      bool      `json:"paused"`
+	StartedAt   time.Time `json:"-"`
 }
 
 func nsFor(name string) string { return "sbx-" + name }
@@ -120,11 +148,18 @@ func Create(ctx context.Context, req CreateRequest) (string, error) {
 	if ttl <= 0 {
 		ttl = 24
 	}
+	if req.Gpu < 0 {
+		req.Gpu = 0
+	}
+	if req.Gpu > 0 && req.Gpu > 8 {
+		return "", fmt.Errorf("GPU 数量不合法（1-8）")
+	}
 	kc, err := kube.Get()
 	if err != nil {
 		return "", err
 	}
 	ns := nsFor(req.Name)
+	useNodePort := req.NodePort || tpl.DefaultNodePort
 
 	nsObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: ns,
@@ -175,13 +210,21 @@ func Create(ctx context.Context, req CreateRequest) (string, error) {
 		return ns, fmt.Errorf("创建 LimitRange 失败: %w", err)
 	}
 
+	limits := map[string]any{"cpu": cpu, "memory": mem}
+	if req.Gpu > 0 {
+		limits["nvidia.com/gpu"] = req.Gpu
+	}
+
 	container := map[string]any{
 		"name":      "main",
 		"image":     tpl.Image,
-		"resources": map[string]any{"limits": map[string]any{"cpu": cpu, "memory": mem}},
+		"resources": map[string]any{"limits": limits},
 	}
 	if len(tpl.command) > 0 {
 		container["command"] = tpl.command
+	}
+	if len(tpl.Args) > 0 {
+		container["args"] = tpl.Args
 	}
 	if tpl.TTY {
 		container["stdin"] = true
@@ -214,7 +257,7 @@ func Create(ctx context.Context, req CreateRequest) (string, error) {
 	}
 
 	svcType := "ClusterIP"
-	if req.NodePort {
+	if useNodePort {
 		svcType = "NodePort"
 	}
 	svcPorts := []any{}
@@ -286,12 +329,26 @@ func List(ctx context.Context) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// single lookup of an internal node IP so the UI can build access links
+	nodeIP := ""
+	if nodes, nerr := kc.Typed.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); nerr == nil {
+		for _, n := range nodes.Items {
+			for _, a := range n.Status.Addresses {
+				if a.Type == corev1.NodeInternalIP && nodeIP == "" {
+					nodeIP = a.Address
+				}
+			}
+		}
+	}
+
 	items := []Item{}
 	for i := range nsl.Items {
 		item, derr := describeOne(ctx, &nsl.Items[i])
 		if derr != nil {
 			continue
 		}
+		item.NodeIP = nodeIP
 		items = append(items, *item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].AgeSeconds < items[j].AgeSeconds })
@@ -311,6 +368,7 @@ func describeOne(ctx context.Context, ns *corev1.Namespace) (*Item, error) {
 		TTLHours:    parseFloatOr(ann[AnnTTLHours], 24),
 		Description: ann[AnnDescription],
 		AgeSeconds:  time.Since(ns.CreationTimestamp.Time).Milliseconds() / 1000,
+		Paused:      ann[AnnPaused] == "true",
 	}
 	if v, err := strconv.ParseInt(ann[AnnExpiresAt], 10, 64); err == nil {
 		item.ExpiresAt = v
@@ -350,20 +408,105 @@ func describeOne(ctx context.Context, ns *corev1.Namespace) (*Item, error) {
 		for _, s := range svcs.Items {
 			item.ClusterIP = s.Spec.ClusterIP
 			for _, p := range s.Spec.Ports {
+				if p.Port > 0 {
+					item.Ports = append(item.Ports, p.Port)
+				}
 				if p.NodePort > 0 {
 					item.NodePort = p.NodePort
 				}
 			}
 		}
 	}
+
+	// live usage from metrics-server (best effort)
+	if item.Status != "Stopped" {
+		if ml, merr := kc.Dynamic.Resource(metricsPodsGVR).Namespace(full).
+			List(ctx, metav1.ListOptions{}); merr == nil {
+			cpuTotal, memTotal := int64(0), int64(0)
+			for i := range ml.Items {
+				mp := &ml.Items[i]
+				if q := sumUsage(mp.Object, "cpu"); q != nil {
+					cpuTotal += q.MilliValue()
+				}
+				if q := sumUsage(mp.Object, "memory"); q != nil {
+					memTotal += q.Value()
+				}
+			}
+			item.RealCPU = strconv.FormatInt(cpuTotal, 10) + "m"
+			item.RealMemory = humanBytes(memTotal)
+		}
+	}
 	return item, nil
 }
 
+var metricsPodsGVR = schema.GroupVersionResource{
+	Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods",
+}
+
+// sumUsage adds usage.<metric> across all containers of one pod metrics entry.
+func sumUsage(obj map[string]any, metric string) *resource.Quantity {
+	total := resource.NewQuantity(0, resource.DecimalSI)
+	found := false
+	cs, ok, _ := unstructured.NestedSlice(obj, "containers")
+	if !ok {
+		return nil
+	}
+	for _, ci := range cs {
+		cm, ok := ci.(map[string]any)
+		if !ok {
+			continue
+		}
+		s, found, _ := unstructured.NestedString(cm, "usage", metric)
+		if !found || s == "" {
+			continue
+		}
+		q, err := resource.ParseQuantity(s)
+		if err != nil {
+			continue
+		}
+		if metric == "memory" {
+			bin := resource.NewQuantity(total.Value(), resource.BinarySI)
+			bin.Add(q)
+			total = bin
+		} else {
+			total.Add(q)
+		}
+		found = true
+	}
+	if !found {
+		return nil
+	}
+	return total
+}
+
+// SetReplicas scales the sandbox workload up/down. Stopping also marks the
+// namespace paused so the janitor skips it — TTL only burns while running.
 func SetReplicas(ctx context.Context, name string, replicas int32) error {
 	kc, _ := kube.Get()
 	patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"replicas": replicas}})
 	_, err := kc.Dynamic.Resource(gvrApps("deployments")).Namespace(nsFor(name)).
 		Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	annVal := "true"
+	if replicas > 0 {
+		annVal = "" // empty value removes the key with merge patch
+	}
+	nsPatch, _ := json.Marshal(map[string]any{"metadata": map[string]any{
+		"annotations": map[string]any{AnnPaused: annVal}}})
+	_, nerr := kc.Typed.CoreV1().Namespaces().Patch(ctx, nsFor(name),
+		types.MergePatchType, nsPatch, metav1.PatchOptions{})
+	return nerr
+}
+
+// UpdateDescription edits the sandbox description annotation in place.
+func UpdateDescription(ctx context.Context, name, description string) error {
+	kc, _ := kube.Get()
+	patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{
+		"annotations": map[string]any{AnnDescription: description}}})
+	_, err := kc.Typed.CoreV1().Namespaces().Patch(ctx, nsFor(name),
+		types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 
@@ -418,6 +561,9 @@ func runOnce() {
 	now := time.Now().Unix()
 	for i := range nsl.Items {
 		ns := &nsl.Items[i]
+		if ns.Annotations[AnnPaused] == "true" {
+			continue // stopped sandboxes keep their remaining TTL frozen
+		}
 		exp, perr := strconv.ParseInt(ns.Annotations[AnnExpiresAt], 10, 64)
 		if perr != nil || exp <= 0 || now < exp {
 			continue
